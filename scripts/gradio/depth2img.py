@@ -18,14 +18,14 @@ torch.set_grad_enabled(False)
 
 def initialize_model(config, ckpt):
     config = OmegaConf.load(config)
-    model = instantiate_from_config(config.model)
-    model.load_state_dict(torch.load(ckpt)["state_dict"], strict=False)
+    model = instantiate_from_config(config.model)  # 模型
+    model.load_state_dict(torch.load(ckpt)["state_dict"], strict=False)  # 权重 
 
     device = torch.device(
         "cuda") if torch.cuda.is_available() else torch.device("cpu")
     model = model.to(device)
-    sampler = DDIMSampler(model)
-    return sampler
+    sampler = DDIMSampler(model)  # 配置采样器参数
+    return sampler 
 
 
 def make_batch_sd(
@@ -36,14 +36,14 @@ def make_batch_sd(
         model_type="dpt_hybrid"
 ):
     image = np.array(image.convert("RGB"))
-    image = torch.from_numpy(image).to(dtype=torch.float32) / 127.5 - 1.0
+    image = torch.from_numpy(image).to(dtype=torch.float32) / 127.5 - 1.0  
     # sample['jpg'] is tensor hwc in [-1, 1] at this point
-    midas_trafo = AddMiDaS(model_type=model_type)
+    midas_trafo = AddMiDaS(model_type=model_type)  # 加载Midas深度模型
     batch = {
         "jpg": image,
         "txt": num_samples * [txt],
     }
-    batch = midas_trafo(batch)
+    batch = midas_trafo(batch)  # midas_in： jpg: txt：
     batch["jpg"] = rearrange(batch["jpg"], 'h w c -> 1 c h w')
     batch["jpg"] = repeat(batch["jpg"].to(device=device),
                           "1 ... -> n ...", n=num_samples)
@@ -68,46 +68,46 @@ def paint(sampler, image, prompt, t_enc, seed, scale, num_samples=1, callback=No
             torch.autocast("cuda"):
         batch = make_batch_sd(
             image, txt=prompt, device=device, num_samples=num_samples)
-        z = model.get_first_stage_encoding(model.encode_first_stage(
-            batch[model.first_stage_key]))  # move to latent space
+        z = model.get_first_stage_encoding(model.encode_first_stage(  
+            batch[model.first_stage_key]))  # move to latent space  get_first_stage_encoding？ first_stage_key？ concat_keys？
         c = model.cond_stage_model.encode(batch["txt"])
         c_cat = list()
         for ck in model.concat_keys:
             cc = batch[ck]
-            cc = model.depth_model(cc)
+            cc = model.depth_model(cc)  # depth_model？
             depth_min, depth_max = torch.amin(cc, dim=[1, 2, 3], keepdim=True), torch.amax(cc, dim=[1, 2, 3],
-                                                                                           keepdim=True)
-            display_depth = (cc - depth_min) / (depth_max - depth_min)
+                                                                                           keepdim=True)  # 获得 1 2 3维度最值
+            display_depth = (cc - depth_min) / (depth_max - depth_min)  # 深度归一化0-1
             depth_image = Image.fromarray(
-                (display_depth[0, 0, ...].cpu().numpy() * 255.).astype(np.uint8))
+                (display_depth[0, 0, ...].cpu().numpy() * 255.).astype(np.uint8))  # PIL深度图
             cc = torch.nn.functional.interpolate(
                 cc,
-                size=z.shape[2:],
-                mode="bicubic",
-                align_corners=False,
+                size=z.shape[2:],  
+                mode="bicubic",  # 加权平均
+                align_corners=False,  # 不使用像素对齐
             )
             depth_min, depth_max = torch.amin(cc, dim=[1, 2, 3], keepdim=True), torch.amax(cc, dim=[1, 2, 3],
                                                                                            keepdim=True)
             cc = 2. * (cc - depth_min) / (depth_max - depth_min) - 1.
             c_cat.append(cc)
-        c_cat = torch.cat(c_cat, dim=1)
-        # cond
+        c_cat = torch.cat(c_cat, dim=1)  # dim=1 ( 1 c h w)
+        # cond 条件
         cond = {"c_concat": [c_cat], "c_crossattn": [c]}
 
         # uncond cond
-        uc_cross = model.get_unconditional_conditioning(num_samples, "")
+        uc_cross = model.get_unconditional_conditioning(num_samples, "")  # get_unconditional_conditioning？
         uc_full = {"c_concat": [c_cat], "c_crossattn": [uc_cross]}
         if not do_full_sample:
-            # encode (scaled latent)
+            # encode (scaled latent) 随机编码
             z_enc = sampler.stochastic_encode(
                 z, torch.tensor([t_enc] * num_samples).to(model.device))
         else:
             z_enc = torch.randn_like(z)
-        # decode it
+        # decode it  解码
         samples = sampler.decode(z_enc, cond, t_enc, unconditional_guidance_scale=scale,
                                  unconditional_conditioning=uc_full, callback=callback)
         x_samples_ddim = model.decode_first_stage(samples)
-        result = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
+        result = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)  #(-1,1)-(0,1)
         result = result.cpu().numpy().transpose(0, 2, 3, 1) * 255
     return [depth_image] + [put_watermark(Image.fromarray(img.astype(np.uint8)), wm_encoder) for img in result]
 
@@ -121,12 +121,12 @@ def pad_image(input_image):
 
 
 def predict(input_image, prompt, steps, num_samples, scale, seed, eta, strength):
-    init_image = input_image.convert("RGB")
-    image = pad_image(init_image)  # resize to integer multiple of 32
+    init_image = input_image.convert("RGB")  
+    image = pad_image(init_image)  # resize to integer multiple of 32              iamge
 
-    sampler.make_schedule(steps, ddim_eta=eta, verbose=True)
+    sampler.make_schedule(steps, ddim_eta=eta, verbose=True)                     # sampler
     assert 0. <= strength <= 1., 'can only work with strength in [0.0, 1.0]'
-    do_full_sample = strength == 1.
+    do_full_sample = strength == 1.  # bool
     t_enc = min(int(strength * steps), steps-1)
     result = paint(
         sampler=sampler,
@@ -151,9 +151,9 @@ with block:
 
     with gr.Row():
         with gr.Column():
-            input_image = gr.Image(source='upload', type="pil")
-            prompt = gr.Textbox(label="Prompt")
-            run_button = gr.Button(label="Run")
+            input_image = gr.Image(source='upload', type="pil")  # 图片输入
+            prompt = gr.Textbox(label="Prompt")  # 提示词
+            run_button = gr.Button(label="Run")  # 运行
             with gr.Accordion("Advanced options", open=False):
                 num_samples = gr.Slider(
                     label="Images", minimum=1, maximum=4, value=1, step=1)
@@ -178,7 +178,7 @@ with block:
                 grid=[2], height="auto")
 
     run_button.click(fn=predict, inputs=[
-                     input_image, prompt, ddim_steps, num_samples, scale, seed, eta, strength], outputs=[gallery])
-
+                     input_image, prompt, ddim_steps, num_samples, scale, seed, eta, strength], outputs=[gallery])  # run predict back gallery
+ 
 
 block.launch()
