@@ -48,7 +48,7 @@ def make_batch_sd(
     image = image[None].transpose(0, 3, 1, 2)
     image = torch.from_numpy(image).to(dtype=torch.float32) / 127.5 - 1.0
 
-    mask = np.array(mask.convert("L"))
+    mask = np.array(mask.convert("L"))  # 灰度图
     mask = mask.astype(np.float32) / 255.0
     mask = mask[None, None]
     mask[mask < 0.5] = 0
@@ -86,17 +86,17 @@ def inpaint(sampler, image, mask, prompt, seed, scale, ddim_steps, num_samples=1
         batch = make_batch_sd(image, mask, txt=prompt,
                               device=device, num_samples=num_samples)
 
-        c = model.cond_stage_model.encode(batch["txt"])
+        c = model.cond_stage_model.encode(batch["txt"])  # cond_stage_model
 
         c_cat = list()
-        for ck in model.concat_keys:
+        for ck in model.concat_keys:  # concat_keys
             cc = batch[ck].float()
-            if ck != model.masked_image_key:
+            if ck != model.masked_image_key:  # masked_image_key
                 bchw = [num_samples, 4, h // 8, w // 8]
                 cc = torch.nn.functional.interpolate(cc, size=bchw[-2:])
             else:
-                cc = model.get_first_stage_encoding(
-                    model.encode_first_stage(cc))
+                cc = model.get_first_stage_encoding(  # get_first_stage_encoding
+                    model.encode_first_stage(cc))  # encode_first_stage
             c_cat.append(cc)
         c_cat = torch.cat(c_cat, dim=1)
 
@@ -119,9 +119,10 @@ def inpaint(sampler, image, mask, prompt, seed, scale, ddim_steps, num_samples=1
             unconditional_conditioning=uc_full,
             x_T=start_code,
         )
-        x_samples_ddim = model.decode_first_stage(samples_cfg)
+        x_samples_ddim = model.decode_first_stage(samples_cfg)  # decode_first_stage
 
-        result = torch.clamp((x_samples_ddim + 1.0) / 2.0,
+        result = torch.clamp((1
+         + 1.0) / 2.0,
                              min=0.0, max=1.0)
 
         result = result.cpu().numpy().transpose(0, 2, 3, 1) * 255
